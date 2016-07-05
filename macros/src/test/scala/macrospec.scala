@@ -1,7 +1,7 @@
 import reactivemongo.bson._
 import org.specs2.mutable._
 import reactivemongo.bson.exceptions.DocumentKeyNotFound
-import reactivemongo.bson.Macros.Annotations.{ Key, Ignore }
+import reactivemongo.bson.Macros.Annotations.Key
 
 class Macros extends Specification {
   type Handler[A] = BSONDocumentReader[A] with BSONDocumentWriter[A] with BSONHandler[BSONDocument, A]
@@ -21,11 +21,11 @@ class Macros extends Specification {
   case class Single(value: String)
   case class OptionalSingle(value: Option[String])
   case class SingleTuple(value: (String, String))
-  case class User(_id: BSONObjectID = BSONObjectID.generate(), name: String)
+  case class User(_id: BSONObjectID = BSONObjectID.generate, name: String)
   case class WordLover(name: String, words: Seq[String])
   case class Empty()
   object EmptyObject
-  case class RenamedId(@Key("_id") myID: BSONObjectID = BSONObjectID.generate(), @CustomAnnotation value: String)
+  case class RenamedId(@Key("_id") myID: BSONObjectID = BSONObjectID.generate, @CustomAnnotation value: String)
 
   object Nest {
     case class Nested(name: String)
@@ -33,7 +33,9 @@ class Macros extends Specification {
 
   case class OverloadedApply(string: String)
   object OverloadedApply {
-    def apply(n: Int) = { /* println(n) */ }
+    def apply(n: Int) {
+      println(n)
+    }
 
     def apply(seq: Seq[String]): OverloadedApply = OverloadedApply(seq mkString " ")
   }
@@ -80,10 +82,7 @@ class Macros extends Specification {
 
     object Tree {
       import Macros.Options._
-
-      implicit val bson: Handler[Tree] =
-        Macros.handlerOpts[Tree, UnionType[Node \/ Leaf]]
-      //Macros.handlerOpts[Tree, UnionType[Node \/ Leaf] with Verbose]
+      implicit val bson: Handler[Tree] = Macros.handlerOpts[Tree, UnionType[Node \/ Leaf] with Verbose]
     }
   }
 
@@ -93,8 +92,7 @@ class Macros extends Specification {
     case object Tail extends IntList
 
     object IntList {
-      import Macros.Options.{ UnionType, \/ }
-
+      import Macros.Options._
       implicit val bson: Handler[IntList] = Macros.handlerOpts[IntList, UnionType[Cons \/ Tail.type]]
     }
   }
@@ -106,10 +104,6 @@ class Macros extends Specification {
     sealed trait TT extends T
     case class C() extends TT
   }
-
-  case class Pair(@Ignore left: String, right: String)
-
-  val pairHandler = Macros.handler[Pair]
 
   "Formatter" should {
     "handle primitives" in {
@@ -191,48 +185,14 @@ class Macros extends Specification {
       roundtrip(person, format)
     }
 
-    "persist simple class name on demand" in {
-      val person = Person("john", "doe")
-      val format = Macros.handlerOpts[Person, Macros.Options.SaveSimpleName]
-      val doc = format write person
-      doc.getAs[String]("className") mustEqual Some("Person")
-      roundtrip(person, format)
-    }
-
-    "handle union types (ADT)" in {
+    "handle union types(ADT)" in {
       import Union._
       import Macros.Options._
       val a = UA(1)
       val b = UB("hai")
       val format = Macros.handlerOpts[UT, UnionType[UA \/ UB \/ UC \/ UD]]
-
-      /* TODO: Remove
       println(BSONDocument pretty (format write a))
       println(BSONDocument pretty (format write b))
-       */
-
-      format.write(a).getAs[String]("className") must beSome("Macros.Union.UA")
-      format.write(b).getAs[String]("className") must beSome("Macros.Union.UB")
-
-      roundtrip(a, format)
-      roundtrip(b, format)
-    }
-
-    "handle union types (ADT) with simple names" in {
-      import Union._
-      import Macros.Options._
-      val a = UA(1)
-      val b = UB("hai")
-      val format = Macros.handlerOpts[UT, SimpleUnionType[UA \/ UB \/ UC \/ UD]]
-
-      /* TODO: Remove
-      println(BSONDocument pretty (format write a))
-      println(BSONDocument pretty (format write b))
-       */
-
-      format.write(a).getAs[String]("className") must beSome("UA")
-      format.write(b).getAs[String]("className") must beSome("UB")
-
       roundtrip(a, format)
       roundtrip(b, format)
     }
@@ -274,10 +234,6 @@ class Macros extends Specification {
       import Macros.Options._
       import Union._
       implicit val format = Macros.handlerOpts[UT, AllImplementations]
-
-      format.write(UA(1)).getAs[String]("className") must beSome("Macros.Union.UA")
-      format.write(UB("buzz")).getAs[String]("className") must beSome("Macros.Union.UB")
-
       roundtripImp[UT](UA(17))
       roundtripImp[UT](UB("foo"))
       roundtripImp[UT](UC("bar"))
@@ -288,37 +244,6 @@ class Macros extends Specification {
       import Macros.Options._
       import InheritanceModule._
       implicit val format = Macros.handlerOpts[T, AllImplementations]
-
-      format.write(A()).getAs[String]("className") must beSome("Macros.InheritanceModule.A")
-      format.write(B).getAs[String]("className") must beSome("Macros.InheritanceModule.B")
-
-      roundtripImp[T](A())
-      roundtripImp[T](B)
-      roundtripImp[T](C())
-    }
-
-    "automate Union on sealed traits with simple name" in {
-      import Macros.Options._
-      import Union._
-      implicit val format = Macros.handlerOpts[UT, SimpleAllImplementations]
-
-      format.write(UA(1)).getAs[String]("className") must beSome("UA")
-      format.write(UB("buzz")).getAs[String]("className") must beSome("UB")
-
-      roundtripImp[UT](UA(17))
-      roundtripImp[UT](UB("foo"))
-      roundtripImp[UT](UC("bar"))
-      roundtripImp[UT](UD("baz"))
-    }
-
-    "support automatic implementations search with nested traits with simple name" in {
-      import Macros.Options._
-      import InheritanceModule._
-      implicit val format = Macros.handlerOpts[T, SimpleAllImplementations]
-
-      format.write(A()).getAs[String]("className") must beSome("A")
-      format.write(B).getAs[String]("className") must beSome("B")
-
       roundtripImp[T](A())
       roundtripImp[T](B)
       roundtripImp[T](C())
@@ -328,21 +253,10 @@ class Macros extends Specification {
       implicit val format = Macros.handler[RenamedId]
       val doc = RenamedId(value = "some value")
       val serialized = format write doc
-
-      /* TODO: Remove
       println("renaming")
       println(BSONDocument.pretty(serialized))
-       */
-
       serialized mustEqual BSONDocument("_id" -> doc.myID, "value" -> doc.value)
       format.read(serialized) mustEqual doc
-    }
-
-    "skip ignored fields" in {
-      val doc = pairHandler.write(Pair(left = "left", right = "right"))
-
-      doc.isEmpty must beFalse
-      doc.aka(BSONDocument.pretty(doc)) mustEqual BSONDocument("right" -> "right")
     }
   }
 
@@ -363,4 +277,5 @@ class Macros extends Specification {
       }
     }
   }
+
 }

@@ -1,13 +1,10 @@
-import scala.concurrent.{ Await, ExecutionContext }
-import scala.concurrent.duration._
-import reactivemongo.api.{
-  FailoverStrategy,
-  MongoDriver,
-  MongoConnection,
-  MongoConnectionOptions
-}
-
 object Common {
+  import scala.concurrent._
+  import scala.concurrent.duration._
+  import reactivemongo.api._
+
+  implicit val ec = ExecutionContext.Implicits.global
+
   val logger = reactivemongo.util.LazyLogger("tests")
 
   val replSetOn =
@@ -42,8 +39,6 @@ object Common {
     } else opts
   }
 
-  lazy val connection = driver.connection(List(primaryHost), DefaultOptions)
-
   private val timeoutFactor = 1.25D
   def estTimeout(fos: FailoverStrategy): FiniteDuration =
     (1 to fos.retries).foldLeft(fos.initialDelay) { (d, i) =>
@@ -56,96 +51,14 @@ object Common {
     if (maxTimeout < 10.seconds) 10.seconds
     else maxTimeout
   }
+  val timeoutMillis = timeout.toMillis.toInt
 
-  val commonDb = "specs2-test-reactivemongo"
-
-  // ---
-
-  val slowFailover = {
-    val retries = Option(System getProperty "test.slowFailoverRetries").
-      fold(20)(_.toInt)
-
-    failoverStrategy.copy(retries = retries)
-  }
-
-  val SlowOptions = DefaultOptions.copy(
-    failoverStrategy = slowFailover
+  lazy val connection = driver.connection(List(primaryHost), DefaultOptions)
+  lazy val db = Await.result(
+    connection.database("specs2-test-reactivemongo").flatMap({ _db =>
+      _db.drop().map(_ => _db)
+    }), timeout
   )
-
-  val slowPrimary = Option(
-    System getProperty "test.slowPrimaryHost"
-  ).getOrElse("localhost:27019")
-
-  val slowTimeout: FiniteDuration = {
-    val maxTimeout = estTimeout(slowFailover)
-
-    if (maxTimeout < 10.seconds) 10.seconds
-    else maxTimeout
-  }
-
-  val slowProxy: NettyProxy = {
-    import java.net.InetSocketAddress
-
-    val delay = Option(System getProperty "test.slowProxyDelay").
-      fold(500L /* ms */ )(_.toLong)
-
-    val AddressPort = """^(.*):(.*)$""".r
-    def localAddr: InetSocketAddress = slowPrimary match {
-      case AddressPort(addr, p) => try {
-        val port = p.toInt
-        new InetSocketAddress(addr, port)
-      } catch {
-        case e: Throwable =>
-          logger.error(s"fails to prepare local address: $e")
-          throw e
-      }
-
-      case _ => sys.error(s"invalid local address: $slowPrimary")
-    }
-
-    def remoteAddr: InetSocketAddress = primaryHost.span(_ != ':') match {
-      case (host, p) => try {
-        val port = p.drop(1).toInt
-        new InetSocketAddress(host, port)
-      } catch {
-        case e: Throwable =>
-          logger.error(s"fails to prepare remote address: $e")
-          throw e
-      }
-
-      case _ => sys.error(s"invalid remote address: $primaryHost")
-    }
-
-    val proxy = new NettyProxy(Seq(localAddr), remoteAddr, Some(delay))
-    proxy.start()
-    proxy
-  }
-
-  lazy val slowConnection = driver.connection(List(slowPrimary), SlowOptions)
-
-  lazy val (db, slowDb) = {
-    import ExecutionContext.Implicits.global
-
-    val _db = connection.database(commonDb, failoverStrategy)
-    Await.result(_db.flatMap { d => d.drop.map(_ => d) }, timeout)
-
-    Await.result(_db, timeout) -> Await.result(
-      slowConnection.database(commonDb, slowFailover), slowTimeout
-    )
-  }
-
-  @annotation.tailrec
-  def tryUntil[T](retries: List[Int])(f: => T, test: T => Boolean): Boolean =
-    if (test(f)) true else retries match {
-      case delay :: next => {
-        Thread.sleep(delay)
-        tryUntil(next)(f, test)
-      }
-
-      case _ => false
-    }
-
-  // ---
 
   def close(): Unit = {
     if (driverStarted) {
@@ -157,7 +70,5 @@ object Common {
           logger.debug("Fails to stop the default driver", e)
       }
     }
-
-    slowProxy.stop()
   }
 }

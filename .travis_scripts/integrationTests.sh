@@ -2,6 +2,8 @@
 
 source /tmp/integration-env.sh
 
+echo "Primary= $PRIMARY_HOST"
+
 export LD_LIBRARY_PATH
 
 # Print version information
@@ -44,16 +46,28 @@ cat > /dev/stdout <<EOF
 - Test options: $TEST_OPTS
 EOF
 
+sbt ++$TRAVIS_SCALA_VERSION 'test:compile' && sleep 30s
+
 export JVM_OPTS
 
-TEST_ARGS=";project ReactiveMongo ;testOnly -- $TEST_OPTS"
-TEST_ARGS="$TEST_ARGS ;project ReactiveMongo-Iteratees ;testOnly -- $TEST_OPTS"
-TEST_ARGS="$TEST_ARGS ;project ReactiveMongo-JMX ;testOnly -- $TEST_OPTS"
+TEST_ARGS=";startMetrics ;project ReactiveMongo ;testOnly -- $TEST_OPTS"
+TEST_ARGS="$TEST_ARGS ;project ReactiveMongo-Iteratees ;test-only IterateeSpec"
+#TEST_ARGS="$TEST_ARGS ;project ReactiveMongo-Iteratees ;testOnly -- $TEST_OPTS"
+#TEST_ARGS="$TEST_ARGS ;project ReactiveMongo-JMX ;testOnly -- $TEST_OPTS"
+TEST_ARGS="$TEST_ARGS ;stopMetrics"
 
 sed -e 's/"-deprecation", //' < project/ReactiveMongo.scala > .tmp && mv .tmp project/ReactiveMongo.scala
 
 sbt ++$TRAVIS_SCALA_VERSION $SBT_ARGS "$TEST_ARGS" || (
-    #tail -n 10000 /tmp/mongod.log | grep -v ' end connection ' | grep -v 'connection accepted' | grep -v 'killcursors: found 0 of 1' | tail -n 100
+    PID=`ps -o pid,comm -u $USER | grep 'mongod$' | awk '{ printf("%s\n", $1); }'`
+
+    if [ ! "x$PID" = "x" ]; then
+        pid -p $PID
+    else
+        echo "ERROR: MongoDB process not found" > /dev/stderr
+    fi
+
+    tail -n 100 /tmp/mongod.log
 
     false
 )

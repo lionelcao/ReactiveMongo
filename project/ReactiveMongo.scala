@@ -40,7 +40,7 @@ object BuildSettings {
     mappings in (Compile, packageBin) ~= filter,
     mappings in (Compile, packageSrc) ~= filter,
     mappings in (Compile, packageDoc) ~= filter) ++
-  Publish.settings ++ Format.settings ++ Publish.mimaSettings
+  Publish.settings ++ Format.settings ++ Publish.mimaSettings ++ Metrics.settings
 
 }
 
@@ -794,4 +794,63 @@ object ReactiveMongoBuild extends Build {
       libraryDependencies ++= Seq(specs) ++ logApi,
       pomPostProcess := providedInternalDeps
     ).dependsOn(driver)
+}
+
+object Metrics {
+  val startMetrics = taskKey[Unit]("Start the metrics")
+  val stopMetrics = taskKey[Unit]("Stop the metrics")
+  val metricsInterval = settingKey[Long]("Metrics collection interval")
+  val metricsReport = settingKey[File]("Metrics report file")
+
+  private val metricsStarted =
+    new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  private var metrics: Option[Thread] = None
+  @volatile var stopping = false
+
+  @volatile var memory: (Long, Double) = _
+
+  private def start(interval: Long): Unit =
+    if (!metricsStarted.getAndSet(true)) {
+      memory = 0L -> 0D
+
+      val rt = java.lang.Runtime.getRuntime
+      val th = new Thread(new Runnable {
+        def run(): Unit = while (!stopping) {
+          val (c, f) = memory
+          val mem = rt.freeMemory()
+          lazy val avg = (c * f) + mem
+          val count = c + 1
+          memory = count -> avg
+
+          Thread.sleep(interval)
+        }
+      })
+
+      th.start()
+      println("Metrics started")
+
+      metrics = Some(th)
+    }
+
+  private def stop(report: File): Unit = {
+    val mem = memory._2.toLong
+
+    if (metricsStarted.getAndSet(false)) {
+      metrics = None
+      stopping = true
+
+      println(s"Metrics stopped: ${report.getAbsolutePath}")
+      IO.write(report, mem.toString)
+    }
+
+    memory = 0L -> 0D
+  }
+
+  val settings = Seq(
+    metricsInterval := 60000L, // 1min
+    metricsReport := target.value / "metrics.out",
+    startMetrics := start(metricsInterval.value),
+    stopMetrics := stop(metricsReport.value)
+  )
 }

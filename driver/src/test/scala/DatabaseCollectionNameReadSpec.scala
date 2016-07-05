@@ -1,59 +1,38 @@
-import scala.concurrent.duration.FiniteDuration
-
+import concurrent.Await
+import org.specs2.mutable.Specification
+import concurrent.duration._
 import reactivemongo.bson.{ BSONString, BSONDocument }
-import reactivemongo.api.MongoConnection
 
 import org.specs2.concurrent.{ ExecutionEnv => EE }
 
-class DatabaseCollectionNameReadSpec extends org.specs2.mutable.Specification {
+class DatabaseCollectionNameReadSpec extends Specification {
   sequential
 
   import Common._
 
-  "ReactiveMongo DB" should {
-    val dbName = s"dbnmeread${System identityHashCode this}"
+  "ReactiveMongo db" should {
+    val db2 = db.sibling("specs2-test-reactivemongo-DatabaseCollectionNameReadSpec")
 
-    "query names of collection from database" >> {
-      def dbSpec(con: MongoConnection, timeout: FiniteDuration)(implicit ee: EE) = {
-        val db2 = con.database(dbName)
-        def i1 = db2.map(_("collection_one")).flatMap(
-          _.insert(BSONDocument("one" -> BSONString("one")))
-        ).map(_.ok)
-
-        def i2 = db2.map(_("collection_two")).flatMap(
-          _.insert(BSONDocument("one" -> BSONString("two")))
-        ).map(_.ok)
-
-        i1 aka "insert #1" must beTrue.await(1, timeout) and {
-          i2 aka "insert #2" must beTrue.await(1, timeout)
-        } and {
-          db2.flatMap(_.collectionNames).
-            map(_.toSet.filterNot(_ startsWith "system.")).
-            aka("names") must beEqualTo(Set(
-              "collection_one", "collection_two"
-            )).await(2, timeout)
+    "query names of collection from database" in { implicit ee: EE =>
+      val collectionNames = for {
+        _ <- {
+          val c1 = db2("collection_one")
+          c1.insert(BSONDocument("one" -> BSONString("one")))
         }
-      }
+        _ <- {
+          val c2 = db2("collection_two")
+          c2.insert(BSONDocument("one" -> BSONString("two")))
+        }
+        ns <- db2.collectionNames.map(_.toSet)
+      } yield ns
 
-      "with the default connection" in { implicit ee: EE =>
-        dbSpec(connection, timeout)
-      }
-
-      "with the slow connection" in { implicit ee: EE =>
-        dbSpec(slowConnection, slowTimeout)
-      }
+      collectionNames.map(_.filterNot(_ startsWith "system.")) must beEqualTo(
+        Set("collection_one", "collection_two")
+      ).await(0, 10.seconds)
     }
 
-    {
-      def dropSpec(con: MongoConnection, timeout: FiniteDuration)(implicit ee: EE) = connection.database(dbName).flatMap(_.drop()) aka "drop" must beEqualTo({}).await(2, timeout)
-
-      "be dropped with the default connection" in { implicit ee: EE =>
-        dropSpec(connection, timeout)
-      }
-
-      "be dropped with the slow connection" in { implicit ee: EE =>
-        dropSpec(slowConnection, slowTimeout)
-      }
+    "remove db..." in {
+      Await.result(db2.drop, DurationInt(10) second) mustEqual (())
     }
   }
 }
