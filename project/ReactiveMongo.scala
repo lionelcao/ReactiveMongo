@@ -15,8 +15,8 @@ object BuildSettings {
   val buildSettings = Defaults.coreDefaultSettings ++ Seq(
     organization := "org.reactivemongo",
     version := buildVersion,
-    scalaVersion := "2.11.2",
-    crossScalaVersions  := Seq("2.11.2", "2.10.4"),
+    scalaVersion := "2.11.8",
+    crossScalaVersions  := Seq("2.11.8", "2.10.4"),
     crossVersion := CrossVersion.binary,
     javaOptions in test ++= Seq("-Xmx512m", "-XX:MaxPermSize=512m"),
     //fork in Test := true, // Don't share executioncontext between SBT CLI/tests
@@ -28,7 +28,7 @@ object BuildSettings {
     mappings in (Compile, packageBin) ~= filter,
     mappings in (Compile, packageSrc) ~= filter,
     mappings in (Compile, packageDoc) ~= filter) ++
-  Publish.settings ++ Travis.settings // ++ Format.settings
+  Publish.settings ++ Travis.settings ++ Metrics.settings // ++ Format.settings
 }
 
 object Publish {
@@ -129,7 +129,7 @@ object Dependencies {
 
   val iteratees = "com.typesafe.play" %% "play-iteratees" % "2.3.5"
 
-  val specs = "org.specs2" %% "specs2-core" % "2.4.9" % "test"
+  val specs = "org.specs2" %% "specs2-core" % "3.8.3" % "test"
 
   val log4jVersion = "2.0.2"
   val log4j = Seq("org.apache.logging.log4j" % "log4j-api" % log4jVersion, "org.apache.logging.log4j" % "log4j-core" % log4jVersion)
@@ -238,5 +238,63 @@ object Travis {
   val settings = Seq(
     Travis.travisSnapshotBranches := Seq("master"),
     commands += Travis.travisCommand)
-  
+}
+
+object Metrics {
+  val startMetrics = taskKey[Unit]("Start the metrics")
+  val stopMetrics = taskKey[Unit]("Stop the metrics")
+  val metricsInterval = settingKey[Long]("Metrics collection interval")
+  val metricsReport = settingKey[File]("Metrics report file")
+
+  private val metricsStarted =
+    new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  private var metrics: Option[Thread] = None
+  @volatile var stopping = false
+
+  @volatile var memory: (Long, Double) = _
+
+  private def start(interval: Long): Unit =
+    if (!metricsStarted.getAndSet(true)) {
+      memory = 0L -> 0D
+
+      val rt = java.lang.Runtime.getRuntime
+      val th = new Thread(new Runnable {
+        def run(): Unit = while (!stopping) {
+          val (c, f) = memory
+          val mem = rt.freeMemory()
+          lazy val avg = (c * f) + mem
+          val count = c + 1
+          memory = count -> avg
+
+          Thread.sleep(interval)
+        }
+      })
+
+      th.start()
+      println("Metrics started")
+
+      metrics = Some(th)
+    }
+
+  private def stop(report: File): Unit = {
+    val mem = memory._2.toLong
+
+    if (metricsStarted.getAndSet(false)) {
+      metrics = None
+      stopping = true
+
+      println(s"Metrics stopped: ${report.getAbsolutePath}")
+      IO.write(report, mem.toString)
+    }
+
+    memory = 0L -> 0D
+  }
+
+  val settings = Seq(
+    metricsInterval := 60000L, // 1min
+    metricsReport := target.value / "metrics.out",
+    startMetrics := start(metricsInterval.value),
+    stopMetrics := stop(metricsReport.value)
+  )
 }

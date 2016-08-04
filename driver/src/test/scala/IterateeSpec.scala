@@ -9,12 +9,12 @@ import reactivemongo.api.{
   Cursor, CursorFlattener, CursorProducer, DB, QueryOpts, WrappedCursor
 }
 
-class CursorSpec extends Specification {
+class IterateeSpec extends Specification {
   sequential
 
   import Common._
 
-  val coll = db("cursorspec")
+  val coll = db(s"iteratee${System identityHashCode this}")
 
   "ReactiveMongo" should {
     "insert 16,517 records" in {
@@ -28,7 +28,7 @@ class CursorSpec extends Specification {
 
     "get all the 16,517 documents" in { implicit ee: EE =>
       var i = 0
-      val future = coll.find(BSONDocument()).cursor.enumerate() |>>> (Iteratee.foreach({ e =>
+      val future = coll.find(BSONDocument.empty).cursor.enumerate() |>>> (Iteratee.foreach({ e =>
         //println(s"doc $i => $e")
         i += 1
       }))
@@ -39,28 +39,6 @@ class CursorSpec extends Specification {
        }.runLast*/
       future.map(_ => i) must beEqualTo(16517).await(0, 21.seconds)
     }
-
-    "get 10 first docs" in { implicit ee: EE =>
-      coll.find(BSONDocument()).cursor.collect[List](10).map(_.size).
-        aka("result size") must beEqualTo(10).await(0, timeout)
-    }
-
-    "produce a custom cursor for the results" in {
-      implicit def fooProducer[T] = new CursorProducer[T] {
-        type ProducedCursor = FooCursor[T]
-        def produce(base: Cursor[T]) = new DefaultFooCursor(base)
-      }
-
-      implicit object fooFlattener extends CursorFlattener[FooCursor] {
-        def flatten[T](future: Future[FooCursor[T]]) =
-          new FlattenedFooCursor(future)
-      }
-
-      val cursor = coll.find(BSONDocument()).cursor
-
-      cursor.foo must_== "Bar" and (
-        Cursor.flatten(Future.successful(cursor)).foo must_== "raB")
-    }    
   }
 
   "BSON Cursor" should {
@@ -74,7 +52,7 @@ class CursorSpec extends Specification {
 
     "read from collection" >> {
       def collection(n: String) = {
-        val col = db(s"somecollection_$n")
+        val col = db(s"colliter_$n")
 
         Future.sequence((0 until 10) map { id =>
           col.insert(BSONDocument("id" -> id))
@@ -126,36 +104,6 @@ class CursorSpec extends Specification {
       "with timeout using tailable enumerator w/o maxDocs" in {
         Await.result(tailable("tenum2").enumerate() |>>> toList, timeout).
           aka("enumerated") must throwA[Exception]
-      }
-
-      "using tailable foldWhile" >> {
-        "successfully" in { implicit ee: EE =>
-          tailable("foldw1").foldWhile(List.empty[Int], 5)(
-            (s, i) => Cursor.Cont(i :: s),
-            (_, e) => Cursor.Fail(e)) must beEqualTo(List(
-              4, 3, 2, 1, 0)).await(0, 25.seconds)
-        }
-
-        "leading to timeout w/o maxDocs" in {
-          Await.result(tailable("foldw2").foldWhile(List.empty[Int])(
-            (s, i) => Cursor.Cont(i :: s),
-            (_, e) => Cursor.Fail(e)), timeout) must throwA[Exception]
-
-        }
-
-        "gracefully stop at connection close w/o maxDocs" in {
-          implicit ee: EE =>
-          val con = driver.connection(List("localhost:27018"))
-          tailable("foldw3", con("specs2-test-reactivemongo")).
-            foldWhile(List.empty[Int])((s, i) => {
-              if (i == 1) con.close() // Force connection close
-              Cursor.Cont(i :: s)
-            }, (_, e) => Cursor.Fail(e)) must beLike[List[Int]] {
-              case is => is.reverse must beLike[List[Int]] {
-                case 0 :: 1 :: _ => ok
-              }
-            }.await(0, 15.seconds)
-        }
       }
     }
   }

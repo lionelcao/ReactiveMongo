@@ -3,6 +3,7 @@ import reactivemongo.api._
 import reactivemongo.bson._
 import scala.concurrent._
 import org.specs2.mutable.Specification
+import org.specs2.concurrent.{ ExecutionEnv => EE }
 import play.api.libs.iteratee.Iteratee
 
 class BSONCollectionSpec extends Specification {
@@ -78,31 +79,31 @@ class BSONCollectionSpec extends Specification {
         Await.result(n, timeout) mustEqual 0
       }
 
-      "with success using foldResponses" in {
+      "with success using foldResponses" in { implicit ee: EE =>
         cursor.foldResponses(0)(
           (i, _) => Cursor.Cont(i+1), (_, e) => Cursor.Fail(e)).
           aka("result") must beEqualTo(1/* one empty response */).
-          await(timeoutMillis)
+          await(0, timeout)
 
       }
 
-      "with success using foldBulks" in {
+      "with success using foldBulks" in { implicit ee: EE =>
         cursor.foldBulks(0)(
           (i, _) => Cursor.Cont(i+1), (_, e) => Cursor.Fail(e)).
           aka("result") must beEqualTo(1/* one empty response */).
-          await(timeoutMillis)
+          await(0, timeout)
 
       }
 
-      "with success using foldWhile" in {
+      "with success using foldWhile" in { implicit ee: EE =>
         cursor.foldWhile(0)(
           (i, _) => Cursor.Cont(i+1), (_, e) => Cursor.Fail(e)).
-          aka("result") must beEqualTo(0).await(timeoutMillis)
+          aka("result") must beEqualTo(0).await(0, timeout)
 
       }
 
-      "with success as option" in {
-        cursor.headOption must beNone.await(timeoutMillis)
+      "with success as option" in { implicit ee: EE =>
+        cursor.headOption must beNone.await(0, timeout)
       }
     }
 
@@ -116,31 +117,31 @@ class BSONCollectionSpec extends Specification {
       @inline def cursor = collection.find(BSONDocument()).cursor[Person]
       val persons = Seq(person, person2, person3, person4, person5)
 
-      "as list" in {
-        (cursor.collect[List]() must beEqualTo(persons).await(timeoutMillis)).
-          and(cursor.headOption must beSome(person).await(timeoutMillis))
+      "as list" in { implicit ee: EE =>
+        (cursor.collect[List]() must beEqualTo(persons).await(0, timeout)).
+          and(cursor.headOption must beSome(person).await(0, timeout))
       }
 
-      "using foldResponses" in {
+      "using foldResponses" in { implicit ee: EE =>
         cursor.foldResponses(0)({ (s, _) => Cursor.Cont(s + 1) },
-          (_, e) => Cursor.Fail(e)) must beEqualTo(1).await(timeoutMillis)
+          (_, e) => Cursor.Fail(e)) must beEqualTo(1).await(0, timeout)
 
       }
 
-      "using foldBulks" in {
+      "using foldBulks" in { implicit ee: EE =>
         cursor.foldBulks(1)({ (s, _) => Cursor.Cont(s + 1) },
-          (_, e) => Cursor.Fail(e)) must beEqualTo(2).await(timeoutMillis)
+          (_, e) => Cursor.Fail(e)) must beEqualTo(2).await(0, timeout)
 
       }
 
-      "using foldWhile" in {
+      "using foldWhile" in { implicit ee: EE =>
         cursor.foldWhile(Nil: Seq[Person])((s, p) => Cursor.Cont(s :+ p),
-          (_, e) => Cursor.Fail(e)) must beEqualTo(persons).await(timeoutMillis)
+          (_, e) => Cursor.Fail(e)) must beEqualTo(persons).await(0, timeout)
 
       }
     }
 
-    "read until John" in {
+    "read until John" in { implicit ee: EE =>
       implicit val reader = PersonReader
       @inline def cursor = collection.find(BSONDocument()).cursor[Person]
       val persons = Seq(person, person2, person3)
@@ -148,7 +149,7 @@ class BSONCollectionSpec extends Specification {
       cursor.foldWhile(Nil: Seq[Person])({ (s, p) =>
         if (p.name == "John") Cursor.Done(s :+ p)
         else Cursor.Cont(s :+ p)
-      }, (_, e) => Cursor.Fail(e)) must beEqualTo(persons).await(timeoutMillis)
+      }, (_, e) => Cursor.Fail(e)) must beEqualTo(persons).await(0, timeout)
     }
 
     "read a doc with error" in {
@@ -168,15 +169,15 @@ class BSONCollectionSpec extends Specification {
       implicit val reader = new SometimesBuggyPersonReader
       @inline def cursor = collection.find(BSONDocument()).cursor[Person]
       
-      "using collect" in {
+      "using collect" in { implicit ee: EE =>
         val collect = cursor.collect[Vector]().map(_.size).recover {
           case e if e.getMessage == "hey hey hey" => -1
           case e => e.printStackTrace(); -2
         }
 
         collect aka "first collect" must not(throwA[Exception]).
-          await(timeoutMillis) and (collect must beEqualTo(-1).
-          await(timeoutMillis))
+          await(0, timeout) and (collect must beEqualTo(-1).
+          await(0, timeout))
       }
 
       "using foldWhile" in {
@@ -184,14 +185,14 @@ class BSONCollectionSpec extends Specification {
           (_, e) => Cursor.Fail(e)), timeout) must throwA[CustomException]
       }
 
-      "fallbacking to final value using foldWhile" in {
+      "fallbacking to final value using foldWhile" in { implicit ee: EE =>
         cursor.foldWhile(0)((i, _) => Cursor.Cont(i+1),
-          (_, e) => Cursor.Done(-1)) must beEqualTo(-1).await(timeoutMillis)
+          (_, e) => Cursor.Done(-1)) must beEqualTo(-1).await(0, timeout)
       }
 
-      "skiping failure using foldWhile" in {
+      "skiping failure using foldWhile" in { implicit ee: EE =>
         cursor.foldWhile(0)((i, _) => Cursor.Cont(i+1),
-          (_, e) => Cursor.Cont(-3)) must beEqualTo(-2).await(timeoutMillis)
+          (_, e) => Cursor.Cont(-3)) must beEqualTo(-2).await(0, timeout)
       }
     }
 
@@ -227,7 +228,7 @@ class BSONCollectionSpec extends Specification {
       result.length mustEqual 4
     }
 
-    "write a doc with error" in {
+    "write a doc with error" in { implicit ee: EE =>
       implicit val writer = BuggyPersonWriter
 
       collection.insert(person).map { lastError =>
@@ -238,7 +239,7 @@ class BSONCollectionSpec extends Specification {
         case e =>
           e.printStackTrace()
           -2
-      } aka "write result" must beEqualTo(-1).await(timeoutMillis)
+      } aka "write result" must beEqualTo(-1).await(0, timeout)
     }
   }
 
@@ -246,16 +247,16 @@ class BSONCollectionSpec extends Specification {
     import reactivemongo.api.indexes._
     val col = db(s"indexed_col_${hashCode}")
 
-    "be first created" in {
+    "be first created" in { implicit ee: EE =>
       col.indexesManager.ensure(Index(
         Seq("token" -> IndexType.Ascending), unique = true)).
-        aka("index creation") must beTrue.await(timeoutMillis)
+        aka("index creation") must beTrue.await(0, timeout)
     }
 
-    "not be created if already exists" in {
+    "not be created if already exists" in { implicit ee: EE =>
       col.indexesManager.ensure(Index(
         Seq("token" -> IndexType.Ascending), unique = true)).
-        aka("index creation") must beFalse.await(timeoutMillis)
+        aka("index creation") must beFalse.await(0, timeout)
       
     }
   }

@@ -1,13 +1,13 @@
 import util.control.NonFatal
 import org.specs2.mutable._
+import org.specs2.concurrent.{ ExecutionEnv => EE }
 import reactivemongo.api.indexes._
 import reactivemongo.api.indexes.IndexType.{ Hashed, Geo2D, Geo2DSpherical }
 import reactivemongo.bson._
 import reactivemongo.core.errors.DatabaseException
-import scala.concurrent.Future
-import scala.concurrent.Await
+import scala.concurrent.{ Await, Future }
 
-object IndexesSpec extends Specification with Tags {
+class IndexesSpec extends Specification {
   "Indexes management" title
 
   sequential
@@ -17,14 +17,14 @@ object IndexesSpec extends Specification with Tags {
   val geo = db("geo")
 
   "ReactiveMongo Geo Indexes" should {
-    "insert some points" in {
+    "insert some points" in { implicit ee: EE =>
       val futs = for(i <- 1 until 10)
       yield geo.insert(BSONDocument("loc" -> BSONArray( BSONDouble(i + 2), BSONDouble(i * 2) )))
 
-      Future.sequence(futs) must not(throwA[Throwable]).await(timeoutMillis)
+      Future.sequence(futs) must not(throwA[Throwable]).await(0, timeout)
     }
 
-    "make index" in {
+    "make index" in {  implicit ee: EE =>
       geo.indexesManager.ensure(Index(
         List("loc" -> Geo2D),
         options = BSONDocument(
@@ -32,7 +32,7 @@ object IndexesSpec extends Specification with Tags {
           "max" -> BSONInteger(95),
           "bits" -> BSONInteger(28)
         )
-      )) aka "index" must beTrue.await(timeoutMillis)
+      )) aka "index" must beTrue.await(0, timeout)
     }
 
     "fail to insert some points out of range" in {
@@ -119,24 +119,25 @@ object IndexesSpec extends Specification with Tags {
   val hashed = db("hashed")
 
   "ReactiveMongo Hashed indexes" should {
-    "insert some data" in { // With WiredTiger, collection must exist before
+    "insert some data" in { implicit ee: EE =>
+      // With WiredTiger, collection must exist before
       val futs = for(i <- 1 until 10)
       yield hashed.insert(BSONDocument("field" -> s"data-$i"))
 
-      Future.sequence(futs) must not(throwA[Throwable]).await(timeoutMillis)
+      Future.sequence(futs) must not(throwA[Throwable]).await(0, timeout)
     }
     
-    "make index" in {
+    "make index" in {  implicit ee: EE =>
       hashed.indexesManager.ensure(Index(List("field" -> Hashed))).
-        aka("index") must beTrue.await(timeoutMillis)
+        aka("index") must beTrue.await(0, timeout)
     }
 
-    "retrieve indexes" in {
+    "retrieve indexes" in { implicit ee: EE =>
       val index = hashed.indexesManager.list().map {
         _.filter(_.name.get == "field_hashed")
       }.filter(!_.isEmpty).map(_.apply(0))
 
-      index.map(_.key(0)) must beEqualTo("field" -> Hashed).await(timeoutMillis)
+      index.map(_.key(0)) must beEqualTo("field" -> Hashed).await(0, timeout)
     }
   }
 

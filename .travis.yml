@@ -1,21 +1,27 @@
 language: scala
-script: sbt ++$TRAVIS_SCALA_VERSION "testOnly * -- -exclude testCommands --"
+sudo: false
+addons:
+  apt:
+    packages:
+    - numactl
+    - libnuma1
+    - libnuma-dev
+    - libnuma-dbg
+cache:
+  directories:
+  - $HOME/.ivy2
+  - $HOME/.sbt
+  - $HOME/ssl
+  - $HOME/mongodb-linux-x86_64-2.6.12
+  - $HOME/mongodb-linux-x86_64-amazon-3.2.8
 scala:
-- 2.11.6
+- 2.11.8
 - 2.10.4
 jdk:
+- oraclejdk8
 - oraclejdk7
-- openjdk7
-- openjdk6
-before_install:
-- sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 7F0CEB10
-- echo 'deb http://downloads-distro.mongodb.org/repo/ubuntu-upstart dist 10gen' |
-  sudo tee /etc/apt/sources.list.d/mongodb.list
-- sudo apt-get update
-- sudo apt-get install mongodb-org-server
-after_success:
-- .travis_scripts/publishSnapshots.sh
-env:
-  global:
-  - secure: AHBkdpd7+WwsSlyeDSt3dyM+hadpjbVDuImvWpWTOBdgCwUI6aOSUc0bwHNmEMrmZ/tY2bPEOT8lebPL7av4kBYYEk/K/lORHLWinrB8THjRwvi4/mtzTBs2Wdo3gj8BNuThEJhTwFtVF/HiuxG0yyIODFb8Ubp7Vp5ySgpdCto=
-  - secure: mL+CDHYec/SQXPjF4+EPHVTYkzFScTtlZWpt+4u2puZoG7aYRvsvSAyL5cA9AOPYNlnamZjelu5zRHb9AWfZwA6EAcBOdA836isdqS2Lm9Y2AIl/iu0ZRDJoUkIG2eWu8nCU01ANoV/qpqj4Zw8K1w5si8xaxPjLgmMcPM2tHrY=
+before_install: ./.travis_scripts/beforeInstall.sh foo 3 default
+script: 
+- source .travis_scripts/jvmopts.sh
+- sbt ++$TRAVIS_SCALA_VERSION ";test:compile ;startMetrics ;testOnly * -- -exclude testCommands -- ;stopMetrics"
+after_success: .travis_scripts/afterSuccess.sh

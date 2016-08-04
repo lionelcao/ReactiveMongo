@@ -1,9 +1,10 @@
 import reactivemongo.bson.{ BSONDocument, BSONString }
 import scala.concurrent.Await
 import scala.util.{ Try, Success, Failure }
-import org.specs2.mutable.{ Specification, Tags }
+import org.specs2.mutable.Specification
+import org.specs2.concurrent.{ ExecutionEnv => EE }
 
-object CollectionSpec extends Specification with Tags {
+class CollectionSpec extends Specification {
   import Common._
 
   sequential
@@ -11,13 +12,13 @@ object CollectionSpec extends Specification with Tags {
   lazy val collection = db("somecollection_collectionspec")
 
   "ReactiveMongo" should {
-    "create a collection" in {
-      collection.create() must beEqualTo(()).await(timeoutMillis)
+    "create a collection" in { implicit ee: EE =>
+      collection.create() must beEqualTo(()).await(0, timeout)
     }
 
-    "convert to capped" in {
+    "convert to capped" in { implicit ee: EE =>
       collection.convertToCapped(2 * 1024 * 1024, None) must beEqualTo(()).
-        await(timeoutMillis)
+        await(0, timeout)
     }
 
     "check if it's capped" in {
@@ -30,6 +31,7 @@ object CollectionSpec extends Specification with Tags {
     }
 
     "insert some docs then test lastError result and finally count" in {
+       implicit ee: EE =>
       val lastError = Await.result(collection.insert(BSONDocument("name" -> BSONString("Jack"))), timeout)
       lastError.ok mustEqual true
       //lastError.updated mustEqual 0
@@ -40,12 +42,12 @@ object CollectionSpec extends Specification with Tags {
       //lastError.getTry("ok") mustEqual Success(BSONDouble(1))
       //lastError.getAs[BSONDouble]("ok") mustEqual Some(BSONDouble(1))
 
-      collection.count() must beEqualTo(1).await(timeoutMillis) and (
-        collection.count(skip = 1) must beEqualTo(0).await(timeoutMillis)) and (
+      collection.count() must beEqualTo(1).await(0, timeout) and (
+        collection.count(skip = 1) must beEqualTo(0).await(0, timeout)) and (
         collection.count(selector = Some(BSONDocument("name" -> "Jack"))).
-          aka ("matching count") must beEqualTo(1).await(timeoutMillis)) and (
+          aka ("matching count") must beEqualTo(1).await(0, timeout)) and (
         collection.count(selector = Some(BSONDocument("name" -> "Foo"))).
-          aka("not matching count") must beEqualTo(0).await(timeoutMillis))
+          aka("not matching count") must beEqualTo(0).await(0, timeout))
     }
 
     // Empty capped need to be enabled with enableTestCommands
@@ -55,8 +57,8 @@ object CollectionSpec extends Specification with Tags {
       Await.result(db.command(Count(collection.name)), timeout) mustEqual 0
     } tag ("testCommands")*/
 
-    "drop it" in {
-      collection.drop() must beEqualTo(()).await(timeoutMillis)
+    "drop it" in { implicit ee: EE =>
+      collection.drop() must beEqualTo(()).await(0, timeout)
     }
   }
 }

@@ -8,7 +8,7 @@ class MongoDriverSpec extends Specification {
 
   sequential
 
-  val hosts = Seq("localhost")
+  val hosts = Seq("localhost:27018")
 
   "MongoDriver" should {
     "start and close cleanly with no connections" in {
